@@ -112,7 +112,18 @@ class Resender(Thread):
 
 class MainNode():
 	global your_port
-	your_port = 3233
+	global connector_port
+	config = open("config.txt", "r")
+	configlist = config.readlines()
+	config.close()
+	for line in configlist:
+		if line.find("your_port:") != -1:
+			line = line.replace('"', "").strip("your_port:").strip("\n")
+			your_port = int(line)
+			print "Port to start server: " + str(your_port)
+		if line.find("connector_port:") != -1:
+				line = line.replace('"', "").strip("connector_port:").strip("\n")
+				connector_port = int(line)
 	def create_server(self):
 		print "Starting Socks6 node auth server.." 
 		your_port = 3233

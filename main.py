@@ -3,6 +3,11 @@ from random import randint
 from multiprocessing import Process
 from threading import Thread
 import random
+import uuid
+import rsa
+from rsa import *
+import base64
+import aes
 print("Welcome to the e network client v0.001");
 if os.path.isfile('id/destination'):
 	print("Destination file found. Loading....");
@@ -19,7 +24,26 @@ your_destination = your_destination.strip();
 f.close;
 print('Your Destination is:' + your_destination);	
 print "Using SOCKS6v001 Auth Beta Test"
-
+if os.path.isfile('keys/private'):
+	print ("Private Key found");
+else:
+	print "Public-private key combo has not been found. Generating a new one. This will  take some time. Please wait.."
+	publickey, privatekey = rsa.newkeys(1024)
+	p = open("keys/public", "w+")
+	p.write(str(publickey))
+	p.close
+	p = open("keys/private", "w+")
+	p.write(str(privatekey))
+	p.close
+	print "New keys generated!"
+p = open("keys/public", "r")
+publickey = p.read()
+p.close()
+p = open("keys/private", "r")
+privatekey = p.read()
+p.close()
+"Print public-private keys loaded!"	
+		
 """define auth packets"""
 SOCKS6_VER = "\x06"
 SOCKS6_NULL = "\x00"
@@ -136,7 +160,7 @@ class MainNode():
 			packet = client.recv(1)
 			if packet == SOCKS6_NULL:
 				print "Client connected.. ["+str(addr)+"]"
-				cli_ver, cli_null, cli_request, node_destination, node_ip, node_port, cli_term=(client.recv(1), client.recv(1), client.recv(1), client.recv(27), client.recv(32), client.recv(4), client.recv(1))
+				cli_ver, cli_null, cli_request, node_destination, node_ip, node_port, node_pub_key, cli_term=(client.recv(1), client.recv(1), client.recv(1), client.recv(27), client.recv(32), client.recv(4),client.recv(326), client.recv(1))
 				list1 = re.findall("........", node_ip)
 				node_ip = [str(int(n, 2)) for n in list1]
 				node_ip = '.'.join(node_ip)
@@ -155,7 +179,7 @@ class MainNode():
 								found = True
 						if not found:
 							nodefile = open("nodes.db", "a+")
-							nodefile.write(node)	
+							nodefile.write(node+":"+node_pub_key)	
 							nodefile.close()
 							print "Wrote new node to file"	
 					client.sendall(SOCKS6_OKAY+SOCKS6_AUTH+SOCKS6_OKAY+SOCKS6_SUCCESS+SOCKS6_ESTABLISHED)
@@ -164,7 +188,7 @@ class MainNode():
 				print "Got a Socks5 client request.."
 				RelayList = open("nodes.db").read().splitlines()
 				randomnode = random.choice(RelayList)
-				node_destination, node_ip, node_port = randomnode.split(":")
+				node_destination, node_ip, node_port, node_pub_key = randomnode.split(":")
 				print "Connecting to Relay: " + node_destination
 				o = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 				o.connect((node_ip, int(node_port)))
@@ -249,6 +273,7 @@ class MainNode():
 	def connect_to_nodes(self):
 		print "Connecting to nodes"
 		global your_destination
+		global publickey
 		connector_port = 3122
 		group = re.compile(u'(?P<ip>\d+\.\d+\.\d+\.\d+)').search(urllib.URLopener().open('http://jsonip.com/').read()).groupdict()
 		your_ip = group['ip']
@@ -262,10 +287,11 @@ class MainNode():
 		print nodeslist
 		print "Beginning to connect to nodes...."
 		for line in nodeslist:
-			destination, ip, port = line.split(":")	
+			destination, ip, port, node_pub_key = line.split(":")	
 			destination = destination.strip()
 			ip = ip.strip()
 			port = port.strip()
+			node_pub_key = node_pub_key.strip()
 			if your_destination != destination:
 				print "Connecting to node: " + destination
 				try:
@@ -274,7 +300,7 @@ class MainNode():
 					print "Error connecting to node: " + destination
 					pass
 				global your_port
-				c.sendall(SOCKS6_NULL+SOCKS6_VER+SOCKS6_NULL+SOCKS6_REQUEST+your_destination+bin_ip+str(your_port)+SOCKS6_NULL)
+				c.sendall(SOCKS6_NULL+SOCKS6_VER+SOCKS6_NULL+SOCKS6_REQUEST+your_destination+bin_ip+str(your_port)+str(publickey)+SOCKS6_NULL)
 				print "Sent Socks6 Auth Header"
 				time.sleep(1)
 				serv_okay, serv_auth, serv_okay, serv_sucss, serv_estab=(c.recv(1), c.recv(1), c.recv(1), c.recv(1), c.recv(1))

@@ -24,6 +24,8 @@ your_destination = your_destination.strip();
 f.close;
 print('Your Destination is:' + your_destination);	
 print "Using SOCKS6v001 Auth Beta Test"
+global publickey
+global privatekey
 if os.path.isfile('keys/private'):
 	print ("Private Key found");
 else:
@@ -80,13 +82,14 @@ class Log:
 		pass
 		
 class SocketTransform(Thread):
-	def __init__(self,src,dest_ip,dest_port,bind=False):
+	def __init__(self,node_pub_key,src,dest_ip,dest_port,bind=False):
 		Thread.__init__(self)
 		self.dest_ip=dest_ip
 		self.dest_port=dest_port
 		self.src=src
 		self.bind=bind
 		self.setDaemon(True)
+		self.node_pub_key=node_pub_key
 
 	def run(self):
 		try:
@@ -100,6 +103,7 @@ class SocketTransform(Thread):
 		self.sock=self.src
 		self.dest=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.dest.connect((self.dest_ip,self.dest_port))
+		self.node_pub_key=node_pub_key
 		if self.bind:
 			print("Waiting for the client")
 			self.sock,info=sock.accept()
@@ -107,9 +111,8 @@ class SocketTransform(Thread):
 		print("Starting Resending")
 		self.sock.settimeout(RESENDTIMEOUT)
 		self.dest.settimeout(RESENDTIMEOUT)
-		Resender(self.sock,self.dest).start()
-		Resender(self.dest,self.sock).start()
-		
+		DecryptedResender(self.sock,self.dest).start()
+		CryptedResender(self.dest,self.sock,node_pub_key).start()
 class Resender(Thread):
 	def __init__(self,src,dest):
 		Thread.__init__(self)
@@ -133,10 +136,65 @@ class Resender(Thread):
 		src.close()
 		dest.close()
 		print("Client quit normally\n")		
+				
+class CryptedResender(Thread):
+	def __init__(self,src,dest,node_pub_key):
+		Thread.__init__(self)
+		self.src=src
+		self.setDaemon(True)
+		self.dest=dest
+		self.node_pub_key=node_pub_key
+
+	def run(self):
+		try:
+			self.resend(self.src,self.dest,self.node_pub_key)
+		except Exception,e:
+			print("Connection lost %s" %(e.message,),Log.ERROR)
+			self.src.close()
+			self.dest.close()
+
+	def resend(self,src,dest,node_pub_key):
+		data=src.recv(10)		
+		print "node's public key:"+ node_pub_key.strip("PublicKey(").strip(")")
+		while data: 
+			crypted_data = encrypt(data, eval(node_pub_key)) # Encrypt data with RSA Key
+			crypted_data = base64.b64encode(crypted_data) # Base64 encode the crypted data
+			dest.sendall(crypted_data)
+			data=src.recv(10)
+		src.close()
+		dest.close()
+		print("Client quit normally\n")
+class DecryptedResender(Thread):
+	def __init__(self,src,dest):
+		Thread.__init__(self)
+		self.src=src
+		self.setDaemon(True)
+		self.dest=dest
+
+	def run(self):
+		try:
+			self.resend(self.src,self.dest)
+		except Exception,e:
+			print("Connection lost %s" %(e.message,),Log.ERROR)
+			self.src.close()
+			self.dest.close()
+
+	def resend(self,src,dest):
+		data=src.recv(172)
+		print data
+		print "Your pub key:"+str(publickey)
+		while data: 
+			uncrypted=decrypt(base64.b64decode(data), eval(privatekey))	
+			dest.sendall(uncrypted)
+			data=src.recv(172)
+		src.close()
+		dest.close()
+		print("Client quit normally\n")							
 
 class MainNode():
 	global your_port
 	global connector_port
+	global node_pub_key
 	config = open("config.txt", "r")
 	configlist = config.readlines()
 	config.close()
@@ -147,7 +205,7 @@ class MainNode():
 			print "Port to start server: " + str(your_port)
 		if line.find("connector_port:") != -1:
 				line = line.replace('"', "").strip("connector_port:").strip("\n")
-				connector_port = int(line)
+				connector_port = int(line)				
 	def create_server(self):
 		print "Starting Socks6 node auth server.." 
 		your_port = 3233
@@ -156,10 +214,12 @@ class MainNode():
 		s.bind(('',your_port))
 		s.listen(1000)
 		while True:
+			global client
 			client, addr = s.accept()
 			packet = client.recv(1)
 			if packet == SOCKS6_NULL:
 				print "Client connected.. ["+str(addr)+"]"
+				global node_pub_key
 				cli_ver, cli_null, cli_request, node_destination, node_ip, node_port, node_pub_key, cli_term=(client.recv(1), client.recv(1), client.recv(1), client.recv(27), client.recv(32), client.recv(4),client.recv(326), client.recv(1))
 				list1 = re.findall("........", node_ip)
 				node_ip = [str(int(n, 2)) for n in list1]
@@ -189,6 +249,7 @@ class MainNode():
 				RelayList = open("nodes.db").read().splitlines()
 				randomnode = random.choice(RelayList)
 				node_destination, node_ip, node_port, node_pub_key = randomnode.split(":")
+				node_pub_key = node_pub_key.strip("\n")
 				print "Connecting to Relay: " + node_destination
 				o = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 				o.connect((node_ip, int(node_port)))
@@ -210,14 +271,14 @@ class MainNode():
 				cli_ver,cli_success,cli_null,cli_byte,cli_server_ip,cli_port1,cli_port2 = (o.recv(1),o.recv(1),o.recv(1),o.recv(1),o.recv(4),o.recv(1),o.recv(1))
 				client.send(cli_ver+cli_success+cli_null+cli_byte+cli_server_ip+cli_port1+cli_port2)
 				print "SENT"
-				Resender(client,o).start()
-				Resender(o,client).start()	
+				CryptedResender(client,o,node_pub_key).start()
+				DecryptedResender(o,client).start()	
 			elif packet == "domain":
 				domain_info = client.recv(4096)
 				domain_file_name, domain_ip = domain_info.split(":")
 				new_doman = open(domain_file_name, "w+")
 				new_domain.write(domain_ip.strip()+"\n")
-				new_domain.close();
+				new_domain.close();									
 			elif packet == "5":
 				print "Got a connection"
 				try:
@@ -263,7 +324,7 @@ class MainNode():
 						f.close();
 						dst_addr_com = dst_addr_com.strip();
 						print(dst_addr_com, dst_port);
-						SocketTransform(server_client,dst_addr_com,int(dst_port)).start()											
+						SocketTransform(node_pub_key,server_client,dst_addr_com,int(dst_port)).start()											
 					else:#Unsupported Command
 						client.sendall(VER+UNSPPORTCMD+server_ip+chr(port/256)+chr(port%256))
 						client.close()

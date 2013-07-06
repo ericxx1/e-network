@@ -91,13 +91,12 @@ class SocketTransform(Thread):
 		self.bind=bind
 		self.setDaemon(True)
 		self.node_pub_key=node_pub_key
-		#print "Sockettrans: " + self.node_pub_key
 
 	def run(self):
 		try:
 			self.resend()
 		except Exception,e:
-			traceback.print_exc()
+			#traceback.print_exc()
 			print("Error on SocketTransform %s" %(e.message,),Log.ERROR)
 			self.sock.close()
 			self.dest.close()
@@ -116,31 +115,7 @@ class SocketTransform(Thread):
 		self.dest.settimeout(RESENDTIMEOUT)
 		DecryptedResender(self.sock,self.dest).start()
 		CryptedResender(self.dest,self.sock,self.node_pub_key).start()
-"""Normal Resender
-class Resender(Thread):
-	def __init__(self,src,dest):
-		Thread.__init__(self)
-		self.src=src
-		self.setDaemon(True)
-		self.dest=dest
-
-	def run(self):
-		try:
-			self.resend(self.src,self.dest)
-		except Exception,e:
-			print("Connection lost %s" %(e.message,),Log.ERROR)
-			self.src.close()
-			self.dest.close()
-
-	def resend(self,src,dest):
-		data=src.recv(10)
-		while data:
-			dest.sendall(data)
-			data=src.recv(10)
-		src.close()
-		dest.close()
-		print("Client quit normally\n")		
-"""				
+	
 class CryptedResender(Thread):
 	def __init__(self,src,dest,node_pub_key):
 		Thread.__init__(self)
@@ -153,7 +128,7 @@ class CryptedResender(Thread):
 		try:
 			self.resend(self.src,self.dest,self.node_pub_key)
 		except Exception,e:
-			traceback.print_exc()
+			#traceback.print_exc()
 			print("Connection lost %s" %(e.message,),Log.ERROR)
 			self.src.close()
 			self.dest.close()
@@ -162,14 +137,13 @@ class CryptedResender(Thread):
 		aeskey = str(uuid.uuid4().hex) # Generate new AES Key
 		key = encrypt(aeskey, eval(str(node_pub_key))) # Encrypt AES key with target's RSA Public Key
 		key = base64.b64encode(key) # Base64 encode the key
-		print "Sent this base64 encoded key: " + key
+		#print "Sent this base64 encoded key: " + key
 		dest.sendall(key)
 		data=src.recv(10)		
-		print "node's public key:"+ node_pub_key
 		while data: 
 			crypted_data = aes.encryptData(aeskey,data) # Encrypt Message with AES Key 
 			crypted_data = base64.b64encode(crypted_data) # Base64 encode the crypted data
-			print "Sent this Crypted Data: " + crypted_data
+			print "Sent: " + crypted_data
 			dest.sendall(crypted_data)
 			data=src.recv(10)
 		src.close()
@@ -187,21 +161,19 @@ class DecryptedResender(Thread):
 		try:
 			self.resend(self.src,self.dest)
 		except Exception,e:
-			traceback.print_exc()
+			#traceback.print_exc()
 			print("Connection lost %s" %(e.message,),Log.ERROR)
 			self.src.close()
 			self.dest.close()
 
 	def resend(self,src,dest):
 		key = src.recv(172)
-		print "Received this base64 encoded aes key: " + key
+		#print "Received this base64 encoded aes key: " + key
 		aeskey = decrypt(base64.b64decode(key), eval(privatekey))
 		data=src.recv(44)
-		print "Your pub key:"+str(publickey)
 		while data: 
-			print "Received this crypted data: " + data
+			print "Received: " + data
 			uncrypted=aes.decryptData(str(aeskey), base64.b64decode(str(data)))#.encode("utf-8")	
-			print uncrypted
 			dest.sendall(uncrypted)
 			data=src.recv(44)
 		src.close()
@@ -246,7 +218,7 @@ class MainNode():
 					for node in nodes:
 						nodefile = open("nodes.db", "r")
 						nodelist = nodefile.readlines()
-						print "nodelist:" + str(nodelist)
+						#print "nodelist:" + str(nodelist)
 						nodefile.close()
 						for line in nodelist:					
 							if node in line:
@@ -269,8 +241,8 @@ class MainNode():
 				o = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 				o.connect((node_ip, int(node_port)))
 				o.send("5")
-				print "Sent 5 Packet"
-				print "Sent Version"
+				#print "Sent 5 Packet"
+				#print "Sent Version"
 				cli_ver, cli_nmethods, cli_methods = (VER,client.recv(1),client.recv(1))
 				o.sendall(cli_ver+cli_nmethods+cli_methods)
 				serv_ver, serv_method = (o.recv(1), o.recv(1))

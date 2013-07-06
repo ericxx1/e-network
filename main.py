@@ -8,6 +8,7 @@ import rsa
 from rsa import *
 import base64
 import aes
+import traceback
 print("Welcome to the e network client v0.001");
 if os.path.isfile('id/destination'):
 	print("Destination file found. Loading....");
@@ -90,11 +91,13 @@ class SocketTransform(Thread):
 		self.bind=bind
 		self.setDaemon(True)
 		self.node_pub_key=node_pub_key
+		#print "Sockettrans: " + self.node_pub_key
 
 	def run(self):
 		try:
 			self.resend()
 		except Exception,e:
+			traceback.print_exc()
 			print("Error on SocketTransform %s" %(e.message,),Log.ERROR)
 			self.sock.close()
 			self.dest.close()
@@ -103,7 +106,7 @@ class SocketTransform(Thread):
 		self.sock=self.src
 		self.dest=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.dest.connect((self.dest_ip,self.dest_port))
-		self.node_pub_key=node_pub_key
+		self.node_pub_key=self.node_pub_key
 		if self.bind:
 			print("Waiting for the client")
 			self.sock,info=sock.accept()
@@ -112,7 +115,8 @@ class SocketTransform(Thread):
 		self.sock.settimeout(RESENDTIMEOUT)
 		self.dest.settimeout(RESENDTIMEOUT)
 		DecryptedResender(self.sock,self.dest).start()
-		CryptedResender(self.dest,self.sock,node_pub_key).start()
+		CryptedResender(self.dest,self.sock,self.node_pub_key).start()
+"""Normal Resender
 class Resender(Thread):
 	def __init__(self,src,dest):
 		Thread.__init__(self)
@@ -136,7 +140,7 @@ class Resender(Thread):
 		src.close()
 		dest.close()
 		print("Client quit normally\n")		
-				
+"""				
 class CryptedResender(Thread):
 	def __init__(self,src,dest,node_pub_key):
 		Thread.__init__(self)
@@ -149,21 +153,29 @@ class CryptedResender(Thread):
 		try:
 			self.resend(self.src,self.dest,self.node_pub_key)
 		except Exception,e:
+			traceback.print_exc()
 			print("Connection lost %s" %(e.message,),Log.ERROR)
 			self.src.close()
 			self.dest.close()
 
 	def resend(self,src,dest,node_pub_key):
+		aeskey = str(uuid.uuid4().hex) # Generate new AES Key
+		key = encrypt(aeskey, eval(str(node_pub_key))) # Encrypt AES key with target's RSA Public Key
+		key = base64.b64encode(key) # Base64 encode the key
+		print "Sent this base64 encoded key: " + key
+		dest.sendall(key)
 		data=src.recv(10)		
-		print "node's public key:"+ node_pub_key.strip("PublicKey(").strip(")")
+		print "node's public key:"+ node_pub_key
 		while data: 
-			crypted_data = encrypt(data, eval(node_pub_key)) # Encrypt data with RSA Key
+			crypted_data = aes.encryptData(aeskey,data) # Encrypt Message with AES Key 
 			crypted_data = base64.b64encode(crypted_data) # Base64 encode the crypted data
+			print "Sent this Crypted Data: " + crypted_data
 			dest.sendall(crypted_data)
 			data=src.recv(10)
 		src.close()
 		dest.close()
 		print("Client quit normally\n")
+		
 class DecryptedResender(Thread):
 	def __init__(self,src,dest):
 		Thread.__init__(self)
@@ -175,18 +187,23 @@ class DecryptedResender(Thread):
 		try:
 			self.resend(self.src,self.dest)
 		except Exception,e:
+			traceback.print_exc()
 			print("Connection lost %s" %(e.message,),Log.ERROR)
 			self.src.close()
 			self.dest.close()
 
 	def resend(self,src,dest):
-		data=src.recv(172)
-		print data
+		key = src.recv(172)
+		print "Received this base64 encoded aes key: " + key
+		aeskey = decrypt(base64.b64decode(key), eval(privatekey))
+		data=src.recv(44)
 		print "Your pub key:"+str(publickey)
 		while data: 
-			uncrypted=decrypt(base64.b64decode(data), eval(privatekey))	
+			print "Received this crypted data: " + data
+			uncrypted=aes.decryptData(str(aeskey), base64.b64decode(str(data)))#.encode("utf-8")	
+			print uncrypted
 			dest.sendall(uncrypted)
-			data=src.recv(172)
+			data=src.recv(44)
 		src.close()
 		dest.close()
 		print("Client quit normally\n")							
@@ -194,7 +211,6 @@ class DecryptedResender(Thread):
 class MainNode():
 	global your_port
 	global connector_port
-	global node_pub_key
 	config = open("config.txt", "r")
 	configlist = config.readlines()
 	config.close()
@@ -219,7 +235,6 @@ class MainNode():
 			packet = client.recv(1)
 			if packet == SOCKS6_NULL:
 				print "Client connected.. ["+str(addr)+"]"
-				global node_pub_key
 				cli_ver, cli_null, cli_request, node_destination, node_ip, node_port, node_pub_key, cli_term=(client.recv(1), client.recv(1), client.recv(1), client.recv(27), client.recv(32), client.recv(4),client.recv(326), client.recv(1))
 				list1 = re.findall("........", node_ip)
 				node_ip = [str(int(n, 2)) for n in list1]
@@ -335,6 +350,7 @@ class MainNode():
 		print "Connecting to nodes"
 		global your_destination
 		global publickey
+		global node_pub_key
 		connector_port = 3122
 		group = re.compile(u'(?P<ip>\d+\.\d+\.\d+\.\d+)').search(urllib.URLopener().open('http://jsonip.com/').read()).groupdict()
 		your_ip = group['ip']
